@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+*.env
+
+*.md
+!README.md
+
+*checkpoint*
+
+*_docs/*
+
+*.ipynb
+

@@ -1,0 +1,15 @@
+*.env
+*.venv
+
+.venv
+
+__pycache__
+
+*cache*
+
+.env
+
+*.md
+!README.md
+
+*_docs/*
