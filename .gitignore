@@ -20,3 +20,5 @@ wheels/
 
 *.ipynb
 
+logs/
+logs

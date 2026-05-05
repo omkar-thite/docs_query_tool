@@ -13,3 +13,9 @@ __pycache__
 !README.md
 
 *_docs/*
+
+*ipynb*
+*ipynb_checkpoints*
+
+logs/
+logs
