@@ -1,3 +1,4 @@
+import os
 import functools
 import time
 from typing import List, AsyncGenerator
@@ -13,39 +14,13 @@ import logging
 from langchain_core.embeddings import Embeddings
 from anyio import to_thread
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+import time 
+import functools
+from typing import AsyncGenerator
+
 logger = logging.getLogger(__name__)
 
-
-headers_to_split_on = [
-            ("#", "Header 1"),
-            ("##", "Header 2"),
-            ("###", "Header 3"),
-           ]
-
-
-chunk_size = 50
-chunk_overlap = 15
-
-markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on, strip_headers = False)
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=chunk_size, chunk_overlap=chunk_overlap, separators=["\n\n", "\n", ". ", " "], add_start_index=True
-)
-
-
-
-class MSMarcoEmbeddings(Embeddings):
-
-    def __init__(self, model_name, token=None):
-        print(model_name)
-        self.model = SentenceTransformer(f'sentence-transformers/{model_name}', token=token)
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self.model.encode(texts, normalize_embeddings=False).tolist()
-
-    def embed_query(self, text: str) -> List[float]:
-        return self.model.encode(text, normalize_embeddings=False).tolist()
-
-
+# ------------- timing functions ---------------# 
 def time_async(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -60,6 +35,7 @@ def time_async(func):
             logger.exception(f"{func.__name__} failed after {elapsed:.3f}s")
             raise
     return wrapper
+
 
 
 def time_async_generator(func):
@@ -81,20 +57,28 @@ def time_async_generator(func):
 
 
 
-@time_async
-async def visit_url_and_decode_content(url):   
-    token = settings.github_api_token.get_secret_value()
+# ------------ Files extraction from source ---------------- # 
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, 
-                           headers={"Authorization": f"Bearer {token}"}
-                        )
-        response.raise_for_status()
-        data = response.json()
-    
+@time_async
+async def visit_url_and_decode_content(url):
+    token = userdata.get("GITHUB_API_TOKEN")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url,
+                               headers={"Authorization": f"Bearer {token}"}
+                            )
+
+    except urllib.error.HTTPError as e:
+        print(f'{e.status_code}: {e}')
+        raise
+
+    response.raise_for_status()
+    data = response.json()
+
     if data.get("truncated"):
         raise RuntimeError("Tree response was truncated — repo too large for single API call")
-            
+
     return await to_thread.run_sync(decode_content, data['content'])
 
 
@@ -102,92 +86,174 @@ def decode_content(encoded_str):
     return base64.b64decode(encoded_str).decode('utf-8')
 
 
-@time_async_generator    
-async def visit_main_tree_and_extract_md_files(repo_configs):
-    token = settings.github_api_token.get_secret_value()
+@time_async_generator
+async def visit_main_tree_and_extract_docs_files(repo_configs):
+    token = userdata.get("GITHUB_API_TOKEN")
 
     # Get full file tree
     async with httpx.AsyncClient() as client:
-        response = await client.get( f"https://api.github.com/repos/{repo_configs['owner']}/{repo_configs['repo']}/git/trees/{repo_configs['branch']}?recursive=1",
-                                        headers={"Authorization": f"Bearer {token}"},
-                                        timeout=10
-                            )
-    
+        try:
+            response = await client.get( f"https://api.github.com/repos/{repo_configs['owner']}/{repo_configs['repo']}/git/trees/{repo_configs['branch']}?recursive=1",
+                                            headers={"Authorization": f"Bearer {token}"},
+                                            timeout=10
+                                )
+            time.sleep(0.01)
+        except urllib.error.HTTPError as e:
+            print(f'{e.status_code}: {e}')
+            raise
+
+
     response.raise_for_status()
     data = response.json()
-    
+
     if data.get("truncated"):
         raise RuntimeError("Tree response was truncated — repo too large for single API call")
-        
+
     for item in data['tree']:
-        if item['path'].endswith('.md'):
+        if 'docs' in item['path'] and item['path'].endswith('.md') and 'api' not in item['path']:
             contents = await visit_url_and_decode_content(item['url'])
 
             yield Document(
-                page_content=contents, 
+                page_content=contents,
                 metadata={
                     "source_path": item['path'],
-                    "repo": repo_configs['repo'],
-                    "owner": repo_configs['owner'],
                     "branch": repo_configs['branch'],
-                    "github_url": f"https://github.com/{repo_configs['owner']}/{repo_configs['repo']}/blob/{repo_configs['branch']}/{item['path']}"
                 }
             )
 
 
+# Parent Child Splitter
+CHUNK_SIZE = 2000       # parent size
+CHILD_SIZE = 512
 
-@time_async_generator 
-async def lazy_markdown_splitter(documents_generator):    
-    async for doc in documents_generator:
-        for split in markdown_splitter.split_text(doc.page_content):
-            split.metadata = {**doc.metadata, **split.metadata}
-            yield split
+# --- Splitters ---
+parent_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=CHUNK_SIZE,
+    chunk_overlap=200,
+    separators=["\n## ", "\n### ", "\n```", "\n\n", "\n"],
+)
 
-
-@time_async_generator 
-async def lazy_split_text_in_chunk(md_splits_generator):
-    '''split: Mardown Split Document'''
-    async for split in md_splits_generator:
-        # Note that split_document expects an iterator containing Documents, so pass split in a list
-        for chunk in text_splitter.split_documents([split]):
-            yield chunk
-
-
-@time_async_generator 
-async def lazy_load_batches(async_iterable, batch_size):
-    batch = []
-    async for item in async_iterable:
-        batch.append(item)
-        if len(batch) == batch_size:
-            yield batch
-            batch = []
-        if batch:
-            yield batch 
+child_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=CHILD_SIZE,
+    chunk_overlap=50,
+)
 
 
-@time_async
-async def lazy_insert_chunk_batches(repo_configs, emb_model, database_url, batch_size=32):
-    
-    document_stream = visit_main_tree_and_extract_md_files(repo_configs)
-    
-    markdown_splits = lazy_markdown_splitter(document_stream)
-    chunk_splits =  lazy_split_text_in_chunk(markdown_splits)
+async def lazy_parent_splitter(file_document):
 
-    embedding_model = MSMarcoEmbeddings(emb_model, token=settings.hf_token)
+    for split in parent_splitter.split_documents([file_document]):
+        split.metadata = {
+                            **file_document.metadata,
+                            **split.metadata,
+                            "parent_id": str(uuid.uuid4()),
+                         }
+        yield split
 
-    vector_store = PGVector(
-        embeddings=embedding_model,
-        collection_name="developer_docs",
-        connection=database_url,
-        use_jsonb=True,
-        create_extension=False,
-    )
 
-    total = 0
-    async for batch in lazy_load_batches(chunk_splits, batch_size): 
-        vector_store.aadd_documents(batch)
-        total += len(batch)
-        print(f"Inserted {total} chunks...")
+async def lazy_child_splitter(parent):
+
+    for split in child_splitter.split_documents([parent]):
+        split.metadata = {
+                            **parent.metadata,
+                            **split.metadata,
+                        }
+        yield split
+
+
+async def lazy_load_batches(file_documents_generator, batch_size=256):
+    parent_batch, child_batch = [], []
+    batch_length = 0
+
+    async for document in file_documents_generator:
+        parent_stream  = lazy_parent_splitter(document)
+
+        async for parent in parent_stream:
+            parent_id = parent.metadata["parent_id"]
+
+            parent_batch.append({
+                "parent_id": parent_id,
+                "content": parent.page_content,
+                "metadata": parent.metadata,
+            })
+
+            async for split in lazy_child_splitter(parent):
+                split.metadata = {**parent.metadata, **split.metadata}
+                child_batch.append({
+                    "id": str(uuid.uuid4()),
+                    "content": split.page_content,
+                    "metadata": split.metadata,
+                })
+
+                if len(child_batch) == batch_size:
+                    yield parent_batch, child_batch
+                    parent_batch = []
+                    child_batch = []
+
+    if child_batch:
+        yield parent_batch, child_batch
+
+
+
+# ----- Writes all children and parents to json -------------# 
+
+# 1 GPU version
+async def lazy_embed_chunks_to_json(
+    repo_configs,
+    model_name = 'msmarco-bert-base-dot-v5',
+    children_path="children.json",
+    parents_path="parents.json",
+):
+    document_stream = visit_main_tree_and_extract_docs_files(repo_configs)
+
+    # --- Load single GPU ---
+    logging.info("Loading embedding model on cuda:0...")
+    model = SentenceTransformer(
+        f"sentence-transformers/{model_name}",
+        token=userdata.get('HF_TOKEN'),
+    ).to("cuda:0")
+
+    total_children = 0
+    total_parents = 0
+    all_parents = []
+
+    with open(children_path, "w") as f:
+        f.write("[\n")
+        first = True
+
+        async for parent_batch, child_batch in lazy_load_batches(document_stream, batch_size=256):
+            logging.info(f"Embedding batch (children={len(child_batch)}) → cuda:0")
+
+            embeddings = await asyncio.to_thread(
+                lambda b=child_batch: model.encode(
+                    [doc["content"] for doc in b],
+                    normalize_embeddings=False,
+                    show_progress_bar=False,
+                ).tolist()
+            )
+
+            all_parents.extend(parent_batch)
+            for doc, emb in zip(child_batch, embeddings):
+                if not first:
+                    f.write(",\n")
+                f.write(json.dumps({**doc, "embedding": emb}))
+                first = False
+
+            f.flush()
+            os.fsync(f.fileno())
+
+            total_children += len(child_batch)
+            total_parents += len(parent_batch)
+            logging.info(f"Flushed to disk. Total children so far: {total_children}")
+
+        f.write("\n]")
+
+    # --- write parents once at the end ---
+    with open(parents_path, "w") as p:
+        json.dump(all_parents, p, indent=2)
+
+    logging.info(f"Saved {total_children} children → {children_path}")
+    logging.info(f"Saved {total_parents} parents  → {parents_path}")
+    return total_children, total_parents
 
 
 @time_async

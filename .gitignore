@@ -22,3 +22,7 @@ wheels/
 
 logs/
 logs
+
+*model_cache
+
+data/

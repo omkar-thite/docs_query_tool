@@ -10,6 +10,18 @@ class Settings(BaseSettings):
     
     github_api_token: SecretStr
     hf_token: SecretStr
+    
     database_url: SecretStr
+    async_database_url: SecretStr
+    
+    db_host: str
+    app_user: str
+    app_password: SecretStr
+    app_db: str
+    db_port: str
+
+
+    emb_model_name: str = 'msmarco-bert-base-dot-v5'
+
 
 settings = Settings()
