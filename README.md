@@ -52,6 +52,11 @@ A Retrieval-Augmented Generation (RAG) pipeline that extracts Markdown documenta
 
 4. *(Optional)* Create a dedicated database user and database as described in the `.env` example below, and use those credentials for vector storage and retrieval.
 
+5. Dev setup
+
+   uv sync
+   uv run pre-commit install
+
 ---
 
 ## Configuration

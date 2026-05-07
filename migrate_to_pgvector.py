@@ -7,7 +7,6 @@ Loads parents.json   →  document_parents  (parent rows, plain text)
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -56,7 +55,7 @@ def setup_schema(conn):
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
         # ── Parents table ─────────────────────────────────────────────────────
-        cur.execute(f"""
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS document_parents (
                 id   TEXT PRIMARY KEY,
                 content     TEXT        NOT NULL,
@@ -220,7 +219,6 @@ def main() -> None:
             print()
 
             verify(conn)
-            print(RETRIEVAL_EXAMPLE)
 
         except Exception as exc:
             print(f"\n✗  Error: {exc}", file=sys.stderr)

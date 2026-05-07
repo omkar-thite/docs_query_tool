@@ -1,13 +1,8 @@
-import os
 import sys
-import json
-import re
 
 from google import genai
 from google.genai import types
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from retrieval import get_similar_chunks
 from config import llm_api_settings
@@ -35,6 +30,7 @@ def build_rag_prompt(query: str, chunks: list[str]) -> str:
         f"### Context\n{context}\n\n"
         f"### Question\n{query}\n\n"
         f"Answer using only the context above. If unknown, say 'Not found'.\n\n"
+        f"If there are code snippets in the context, include them in your answer and format them as markdown.\n\n"
         f"### Answer\n"  # model continues from here
     )
 

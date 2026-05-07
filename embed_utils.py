@@ -1,24 +1,22 @@
 import os
 import functools
 import time
-from typing import List, AsyncGenerator
+import json
+import uuid
+import urllib
+from typing import AsyncGenerator
 import base64
 import httpx
 from langchain_core.documents import Document
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
-from config import settings
 from sentence_transformers import SentenceTransformer
 import logging
-from langchain_core.embeddings import Embeddings
 from anyio import to_thread
+from config import settings
 from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
 )
-import time
-import functools
-from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +65,7 @@ def time_async_generator(func):
 
 @time_async
 async def visit_url_and_decode_content(url):
-    token = userdata.get("GITHUB_API_TOKEN")
+    token = settings.github_api_token.get_secret_value()
 
     try:
         async with httpx.AsyncClient() as client:
@@ -96,7 +94,7 @@ def decode_content(encoded_str):
 
 @time_async_generator
 async def visit_main_tree_and_extract_docs_files(repo_configs):
-    token = userdata.get("GITHUB_API_TOKEN")
+    token = settings.github_api_token.get_secret_value()
 
     # Get full file tree
     async with httpx.AsyncClient() as client:
@@ -176,7 +174,6 @@ async def lazy_child_splitter(parent):
 
 async def lazy_load_batches(file_documents_generator, batch_size=256):
     parent_batch, child_batch = [], []
-    batch_length = 0
 
     async for document in file_documents_generator:
         parent_stream = lazy_parent_splitter(document)
@@ -227,7 +224,7 @@ async def lazy_embed_chunks_to_json(
     logging.info("Loading embedding model on cuda:0...")
     model = SentenceTransformer(
         f"sentence-transformers/{model_name}",
-        token=userdata.get("HF_TOKEN"),
+        token=settings.hf_token.get_secret_value(),
     ).to("cuda:0")
 
     total_children = 0
@@ -243,7 +240,7 @@ async def lazy_embed_chunks_to_json(
         ):
             logging.info(f"Embedding batch (children={len(child_batch)}) → cuda:0")
 
-            embeddings = await asyncio.to_thread(
+            embeddings = await to_thread(
                 lambda b=child_batch: model.encode(
                     [doc["content"] for doc in b],
                     normalize_embeddings=False,

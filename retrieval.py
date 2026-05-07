@@ -1,7 +1,6 @@
 import os
 import sys
-from pgvector.psycopg import register_vector
-from migrate_to_pgvector import DB_CONFIG, EMBEDDING_DIM, get_conn
+from migrate_to_pgvector import DB_CONFIG, get_conn
 from anyio import to_thread
 from typing import List
 from sentence_transformers import SentenceTransformer
@@ -106,7 +105,7 @@ def get_similar_chunks(query: str, k: int = 3) -> dict:
 
 def main():
     query = sys.argv[1]
-    get_query_similar_chunks(query)
+    get_similar_chunks(query)
 
 
 if __name__ == "__main__":
