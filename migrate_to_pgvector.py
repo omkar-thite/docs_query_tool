@@ -21,18 +21,18 @@ from typing import Generator
 # ── Config ────────────────────────────────────────────────────────────────────
 
 DB_CONFIG = {
-    "host":     database_settings.db_host,
-    "port":     database_settings.db_port,
-    "dbname":   database_settings.app_db,
-    "user":     database_settings.app_user,
+    "host": database_settings.db_host,
+    "port": database_settings.db_port,
+    "dbname": database_settings.app_db,
+    "user": database_settings.app_user,
     "password": database_settings.app_password.get_secret_value(),
 }
 
 CHILDREN_JSON = "data/children.json"
-PARENTS_JSON  = "data/parents.json"
+PARENTS_JSON = "data/parents.json"
 
-BATCH_SIZE = 200        
-EMBEDDING_DIM = 768      
+BATCH_SIZE = 200
+EMBEDDING_DIM = 768
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -90,6 +90,7 @@ def setup_schema(conn):
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
 
+
 def load_parents(conn, path: str):
     """
     Insert rows into document_parents.
@@ -100,12 +101,14 @@ def load_parents(conn, path: str):
 
     rows = []
     for p in raw:
-        rows.append((
-            p["parent_id"],
-            p["content"],
-            p["metadata"]["source_path"],
-            p["metadata"]["branch"],
-        ))
+        rows.append(
+            (
+                p["parent_id"],
+                p["content"],
+                p["metadata"]["source_path"],
+                p["metadata"]["branch"],
+            )
+        )
 
     sql = """
                 INSERT INTO document_parents (id, content, source_path, branch)
@@ -114,13 +117,14 @@ def load_parents(conn, path: str):
     """
     inserted = 0
     with conn.cursor() as cur:
-        for batch_start in tqdm(range(0, len(rows), BATCH_SIZE),
-                                desc="  parents", unit="batch"):
+        for batch_start in tqdm(
+            range(0, len(rows), BATCH_SIZE), desc="  parents", unit="batch"
+        ):
             batch = rows[batch_start : batch_start + BATCH_SIZE]
 
             with conn.pipeline():
                 cur.executemany(sql, batch)
-            
+
             inserted += cur.rowcount
 
     conn.commit()
@@ -152,7 +156,7 @@ def load_children(conn, path: str):
             c["id"],
             c["metadata"]["parent_id"],
             c["content"],
-            c["embedding"],                           
+            c["embedding"],
         )
         for c in raw
     ]
@@ -166,13 +170,13 @@ def load_children(conn, path: str):
 
     inserted = 0
     with conn.cursor() as cur:
-        for batch_start in tqdm(range(0, len(rows), BATCH_SIZE),
-                                desc="  children", unit="batch"):
+        for batch_start in tqdm(
+            range(0, len(rows), BATCH_SIZE), desc="  children", unit="batch"
+        ):
             batch = rows[batch_start : batch_start + BATCH_SIZE]
             with conn.pipeline():
                 cur.executemany(sql, batch)
             inserted += cur.rowcount
- 
 
     conn.commit()
     print(f"✓  Children done — last batch rowcount: {inserted:,}")
@@ -180,14 +184,14 @@ def load_children(conn, path: str):
 
 # ── Sanity-check query ────────────────────────────────────────────────────────
 
- 
+
 def verify(conn: psycopg.Connection) -> None:
-    n_parents  = conn.execute("SELECT COUNT(*) FROM document_parents;").fetchone()[0]
+    n_parents = conn.execute("SELECT COUNT(*) FROM document_parents;").fetchone()[0]
     n_children = conn.execute("SELECT COUNT(*) FROM document_chunks;").fetchone()[0]
     n_with_emb = conn.execute(
         "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL;"
     ).fetchone()[0]
- 
+
     print(
         f"\n── Verification ────────────────────────────────\n"
         f"   document_parents    : {n_parents:>8,} rows\n"
@@ -197,31 +201,31 @@ def verify(conn: psycopg.Connection) -> None:
     )
 
 
-
 # ── Entry point ───────────────────────────────────────────────────────────────
- 
+
+
 def main() -> None:
     print("Connecting to PostgreSQL …")
- 
+
     # psycopg3 connections work as context managers — autoclose on exit
     with get_conn(DB_CONFIG) as conn:
         try:
             setup_schema(conn)
             print()
- 
+
             # Parents MUST be inserted first (FK constraint)
-            load_parents(conn,  PARENTS_JSON)
+            load_parents(conn, PARENTS_JSON)
             print()
             load_children(conn, CHILDREN_JSON)
             print()
- 
+
             verify(conn)
             print(RETRIEVAL_EXAMPLE)
- 
+
         except Exception as exc:
             print(f"\n✗  Error: {exc}", file=sys.stderr)
             raise
- 
- 
+
+
 if __name__ == "__main__":
     main()

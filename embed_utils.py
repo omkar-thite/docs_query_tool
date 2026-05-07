@@ -12,14 +12,18 @@ from sentence_transformers import SentenceTransformer
 import logging
 from langchain_core.embeddings import Embeddings
 from anyio import to_thread
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-import time 
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
+import time
 import functools
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
-# ------------- timing functions ---------------# 
+
+# ------------- timing functions ---------------#
 def time_async(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -33,8 +37,8 @@ def time_async(func):
             elapsed = time.perf_counter() - start
             logger.exception(f"{func.__name__} failed after {elapsed:.3f}s")
             raise
-    return wrapper
 
+    return wrapper
 
 
 def time_async_generator(func):
@@ -50,13 +54,16 @@ def time_async_generator(func):
             logger.info(f"{func.__name__} yielded {count} items in {elapsed:.3f}s")
         except Exception:
             elapsed = time.perf_counter() - start
-            logger.exception(f"{func.__name__} failed after {elapsed:.3f}s (yielded {count} items)")
+            logger.exception(
+                f"{func.__name__} failed after {elapsed:.3f}s (yielded {count} items)"
+            )
             raise
+
     return wrapper
 
 
+# ------------ Files extraction from source ---------------- #
 
-# ------------ Files extraction from source ---------------- # 
 
 @time_async
 async def visit_url_and_decode_content(url):
@@ -64,25 +71,27 @@ async def visit_url_and_decode_content(url):
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(url,
-                               headers={"Authorization": f"Bearer {token}"}
-                            )
+            response = await client.get(
+                url, headers={"Authorization": f"Bearer {token}"}
+            )
 
     except urllib.error.HTTPError as e:
-        print(f'{e.status_code}: {e}')
+        print(f"{e.status_code}: {e}")
         raise
 
     response.raise_for_status()
     data = response.json()
 
     if data.get("truncated"):
-        raise RuntimeError("Tree response was truncated — repo too large for single API call")
+        raise RuntimeError(
+            "Tree response was truncated — repo too large for single API call"
+        )
 
-    return await to_thread.run_sync(decode_content, data['content'])
+    return await to_thread.run_sync(decode_content, data["content"])
 
 
 def decode_content(encoded_str):
-    return base64.b64decode(encoded_str).decode('utf-8')
+    return base64.b64decode(encoded_str).decode("utf-8")
 
 
 @time_async_generator
@@ -92,37 +101,43 @@ async def visit_main_tree_and_extract_docs_files(repo_configs):
     # Get full file tree
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get( f"https://api.github.com/repos/{repo_configs['owner']}/{repo_configs['repo']}/git/trees/{repo_configs['branch']}?recursive=1",
-                                            headers={"Authorization": f"Bearer {token}"},
-                                            timeout=10
-                                )
+            response = await client.get(
+                f"https://api.github.com/repos/{repo_configs['owner']}/{repo_configs['repo']}/git/trees/{repo_configs['branch']}?recursive=1",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
             time.sleep(0.01)
         except urllib.error.HTTPError as e:
-            print(f'{e.status_code}: {e}')
+            print(f"{e.status_code}: {e}")
             raise
-
 
     response.raise_for_status()
     data = response.json()
 
     if data.get("truncated"):
-        raise RuntimeError("Tree response was truncated — repo too large for single API call")
+        raise RuntimeError(
+            "Tree response was truncated — repo too large for single API call"
+        )
 
-    for item in data['tree']:
-        if 'docs' in item['path'] and item['path'].endswith('.md') and 'api' not in item['path']:
-            contents = await visit_url_and_decode_content(item['url'])
+    for item in data["tree"]:
+        if (
+            "docs" in item["path"]
+            and item["path"].endswith(".md")
+            and "api" not in item["path"]
+        ):
+            contents = await visit_url_and_decode_content(item["url"])
 
             yield Document(
                 page_content=contents,
                 metadata={
-                    "source_path": item['path'],
-                    "branch": repo_configs['branch'],
-                }
+                    "source_path": item["path"],
+                    "branch": repo_configs["branch"],
+                },
             )
 
 
 # Parent Child Splitter
-CHUNK_SIZE = 2000       # parent size
+CHUNK_SIZE = 2000  # parent size
 CHILD_SIZE = 512
 
 # --- Splitters ---
@@ -142,10 +157,10 @@ async def lazy_parent_splitter(file_document):
 
     for split in parent_splitter.split_documents([file_document]):
         split.metadata = {
-                            **file_document.metadata,
-                            **split.metadata,
-                            "parent_id": str(uuid.uuid4()),
-                         }
+            **file_document.metadata,
+            **split.metadata,
+            "parent_id": str(uuid.uuid4()),
+        }
         yield split
 
 
@@ -153,9 +168,9 @@ async def lazy_child_splitter(parent):
 
     for split in child_splitter.split_documents([parent]):
         split.metadata = {
-                            **parent.metadata,
-                            **split.metadata,
-                        }
+            **parent.metadata,
+            **split.metadata,
+        }
         yield split
 
 
@@ -164,24 +179,28 @@ async def lazy_load_batches(file_documents_generator, batch_size=256):
     batch_length = 0
 
     async for document in file_documents_generator:
-        parent_stream  = lazy_parent_splitter(document)
+        parent_stream = lazy_parent_splitter(document)
 
         async for parent in parent_stream:
             parent_id = parent.metadata["parent_id"]
 
-            parent_batch.append({
-                "parent_id": parent_id,
-                "content": parent.page_content,
-                "metadata": parent.metadata,
-            })
+            parent_batch.append(
+                {
+                    "parent_id": parent_id,
+                    "content": parent.page_content,
+                    "metadata": parent.metadata,
+                }
+            )
 
             async for split in lazy_child_splitter(parent):
                 split.metadata = {**parent.metadata, **split.metadata}
-                child_batch.append({
-                    "id": str(uuid.uuid4()),
-                    "content": split.page_content,
-                    "metadata": split.metadata,
-                })
+                child_batch.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "content": split.page_content,
+                        "metadata": split.metadata,
+                    }
+                )
 
                 if len(child_batch) == batch_size:
                     yield parent_batch, child_batch
@@ -192,13 +211,13 @@ async def lazy_load_batches(file_documents_generator, batch_size=256):
         yield parent_batch, child_batch
 
 
+# ----- Writes all children and parents to json -------------#
 
-# ----- Writes all children and parents to json -------------# 
 
 # 1 GPU version
 async def lazy_embed_chunks_to_json(
     repo_configs,
-    model_name = 'msmarco-bert-base-dot-v5',
+    model_name="msmarco-bert-base-dot-v5",
     children_path="children.json",
     parents_path="parents.json",
 ):
@@ -208,7 +227,7 @@ async def lazy_embed_chunks_to_json(
     logging.info("Loading embedding model on cuda:0...")
     model = SentenceTransformer(
         f"sentence-transformers/{model_name}",
-        token=userdata.get('HF_TOKEN'),
+        token=userdata.get("HF_TOKEN"),
     ).to("cuda:0")
 
     total_children = 0
@@ -219,7 +238,9 @@ async def lazy_embed_chunks_to_json(
         f.write("[\n")
         first = True
 
-        async for parent_batch, child_batch in lazy_load_batches(document_stream, batch_size=256):
+        async for parent_batch, child_batch in lazy_load_batches(
+            document_stream, batch_size=256
+        ):
             logging.info(f"Embedding batch (children={len(child_batch)}) → cuda:0")
 
             embeddings = await asyncio.to_thread(
@@ -259,19 +280,20 @@ async def lazy_embed_chunks_to_json(
 async def delete_all_embeddings(database_url, collection_name="developer_docs"):
     """Truncate all embeddings from the PGVector collection without dropping it."""
 
-    engine =  create_async_engine(database_url)
+    engine = create_async_engine(database_url)
     async with engine.begin() as conn:
         # Delete all rows in the embedding table belonging to this collection
-        await conn.execute(text("""
+        await conn.execute(
+            text("""
             DELETE FROM langchain_pg_embedding
             WHERE collection_id = (
                 SELECT uuid FROM langchain_pg_collection
                 WHERE name = :collection_name
             )
-        """), {"collection_name": collection_name})
-    
+        """),
+            {"collection_name": collection_name},
+        )
+
     await engine.dispose()
-    
+
     print(f"Cleared all embeddings from collection '{collection_name}'.")
-    
-            

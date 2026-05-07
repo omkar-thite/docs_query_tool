@@ -6,13 +6,13 @@ from anyio import to_thread
 from typing import List
 from sentence_transformers import SentenceTransformer
 
-model_name = 'msmarco-bert-base-dot-v5'
+model_name = "msmarco-bert-base-dot-v5"
+
 
 class MSMarcoEmbeddings:
-
     def __init__(self, model_name, token=None):
         safe_model_name = model_name.replace("/", "_")
-        cache_dir = './local_model_cache'
+        cache_dir = "./local_model_cache"
         self.model_path = os.path.join(cache_dir, safe_model_name)
 
         if os.path.exists(self.model_path):
@@ -20,29 +20,29 @@ class MSMarcoEmbeddings:
             self.model = SentenceTransformer(self.model_path)
         else:
             print(f"Loading model from HuggingFace: sentence-transformers/{model_name}")
-            self.model = SentenceTransformer(f'sentence-transformers/{model_name}', token=token)
+            self.model = SentenceTransformer(
+                f"sentence-transformers/{model_name}", token=token
+            )
 
             print(f"Saving model to local directory: {self.model_path}")
             os.makedirs(cache_dir, exist_ok=True)
             self.model.save(self.model_path)
 
-
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         return self.model.encode(
             texts,
             normalize_embeddings=False,
-            batch_size=64,         
+            batch_size=64,
             show_progress_bar=True,
-            convert_to_numpy=True,  
+            convert_to_numpy=True,
         ).tolist()
-    
 
     def embed_query(self, text: str) -> List[float]:
         return self.model.encode(
             text,
             normalize_embeddings=False,
             convert_to_numpy=True,
-        ).tolist() 
+        ).tolist()
 
     async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         """Asynchronous Embed search docs.
@@ -67,19 +67,20 @@ class MSMarcoEmbeddings:
         return await to_thread.run_sync(self.embed_query, text)
 
 
-embedder = MSMarcoEmbeddings(model_name) 
+embedder = MSMarcoEmbeddings(model_name)
+
 
 def get_similar_chunks(query: str, k: int = 3) -> dict:
-    
+
     if not query:
-        print('No query provided') 
+        print("No query provided")
         return
- 
-    with get_conn(DB_CONFIG) as conn: 
-  
-        query_embedding = embedder.embed_query(query) 
- 
-        rows = conn.execute("""
+
+    with get_conn(DB_CONFIG) as conn:
+        query_embedding = embedder.embed_query(query)
+
+        rows = conn.execute(
+            """
             SELECT
                 c.id,
                 c.parent_id,
@@ -92,21 +93,21 @@ def get_similar_chunks(query: str, k: int = 3) -> dict:
             ON c.parent_id = p.id
             ORDER BY distance
             LIMIT 5;
-        """, (query_embedding,)).fetchall()
+        """,
+            (query_embedding,),
+        ).fetchall()
 
-        
         responses = []
-        for row in rows[:k]: 
+        for row in rows[:k]:
             responses.append(row[2])
-        
-        return {
-                'query': query,
-                'responses': responses
-            }
+
+        return {"query": query, "responses": responses}
+
 
 def main():
     query = sys.argv[1]
     get_query_similar_chunks(query)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
