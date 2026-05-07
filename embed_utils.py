@@ -5,7 +5,6 @@ from typing import List, AsyncGenerator
 import base64
 import httpx
 from langchain_core.documents import Document
-from langchain_postgres import PGVector
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 from config import settings

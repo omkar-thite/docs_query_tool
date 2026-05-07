@@ -3,13 +3,6 @@ load_to_pgvector.py
 ────────────────────────────────────────────────────────────────────────────
 Loads children.json  →  document_chunks   (child rows + embeddings)
 Loads parents.json   →  document_parents  (parent rows, plain text)
-
-Prerequisites
-─────────────
-    pip install psycopg2-binary pgvector tqdm
-
-Environment variables (or edit DB_CONFIG below)
-    PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
 ────────────────────────────────────────────────────────────────────────────
 """
 
@@ -21,18 +14,18 @@ from pathlib import Path
 import psycopg
 from tqdm import tqdm
 
-from config import settings
+from config import database_settings
 from contextlib import contextmanager
 
 from typing import Generator
 # ── Config ────────────────────────────────────────────────────────────────────
 
 DB_CONFIG = {
-    "host":     settings.db_host,
-    "port":     settings.db_port,
-    "dbname":   settings.app_db,
-    "user":     settings.app_user,
-    "password": settings.app_password.get_secret_value(),
+    "host":     database_settings.db_host,
+    "port":     database_settings.db_port,
+    "dbname":   database_settings.app_db,
+    "user":     database_settings.app_user,
+    "password": database_settings.app_password.get_secret_value(),
 }
 
 CHILDREN_JSON = "data/children.json"
@@ -44,7 +37,7 @@ EMBEDDING_DIM = 768
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 @contextmanager
-def get_conn() -> Generator[psycopg.Connection, None, None]:
+def get_conn(DB_CONFIG) -> Generator[psycopg.Connection, None, None]:
     """
     Establishes a connection to the database using a URL.
     The connection is automatically closed after the generator is exhausted.
@@ -211,7 +204,7 @@ def main() -> None:
     print("Connecting to PostgreSQL …")
  
     # psycopg3 connections work as context managers — autoclose on exit
-    with get_conn() as conn:
+    with get_conn(DB_CONFIG) as conn:
         try:
             setup_schema(conn)
             print()
