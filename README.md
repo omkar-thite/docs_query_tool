@@ -1,8 +1,8 @@
 # RAG Pipeline for Documentations
 [Under Development]  
 
-This is supposed to be an offline tool for developers. The idea is to get a quick documnetation reference for a given developer query.  
-eg. a developer want to implement certain niche logic, but is not aware if library already gives training wheels. So he/she goes tothat library's docs and searches for relevant code. This tool automate this process, it take what developer wants as a query, search through doc's embeddings, and if something similar is found then return it in natural language. I'm building in a way so smaller models can also work well in local machine. But right now the tool calls google's gemini model to process chunks. 
+This is supposed to be an offline tool for developers. The idea is to get a quick documentation reference for a given developer query.  
+eg. a developer want to implement certain niche logic, but is not aware if library already gives training wheels. So he/she goes to library's documentation and searches for relevant section. This tool aims to automate this process, it take what developer wants as a query, search through doc's embeddings, and if something similar is found then returns it in thorugh LLM. Tool will be developed in a way so smaller models can be used in local machines as LLMs. Currently it calls google's gemini API to generate response. 
 
 In short, a Retrieval-Augmented Generation (RAG) pipeline that extracts Markdown documentation from GitHub repositories *(currently configured for pydantic)*, processes text into hierarchical chunks, generates vector embeddings, and stores them in PostgreSQL via `pgvector`. Queries are answered by Google's Gemini LLM using context retrieved through vector similarity search.
 
