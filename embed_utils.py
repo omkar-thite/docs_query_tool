@@ -17,6 +17,9 @@ from config import settings
 from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
 )
+import asyncio
+from itertools import islice
+import anyio
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,7 @@ def decode_content(encoded_str):
 
 
 @time_async_generator
-async def visit_main_tree_and_extract_docs_files(repo_configs):
+async def extract_main_tree(repo_configs):
     token = settings.github_api_token.get_secret_value()
 
     # Get full file tree
@@ -104,7 +107,7 @@ async def visit_main_tree_and_extract_docs_files(repo_configs):
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10,
             )
-            time.sleep(0.01)
+            await anyio.sleep(0.01)
         except urllib.error.HTTPError as e:
             print(f"{e.status_code}: {e}")
             raise
@@ -117,14 +120,26 @@ async def visit_main_tree_and_extract_docs_files(repo_configs):
             "Tree response was truncated — repo too large for single API call"
         )
 
-    for item in data["tree"]:
-        if (
-            "docs" in item["path"]
-            and item["path"].endswith(".md")
-            and "api" not in item["path"]
-        ):
-            contents = await visit_url_and_decode_content(item["url"])
+    return [
+        item
+        for item in data["tree"]
+        if "docs" in item["path"]
+        and item["path"].endswith(".md")
+        and "api" not in item["path"]
+    ]
 
+
+async def stream_documents_in_batches(repo_configs: dict, batch_size=10):
+
+    tree = await extract_main_tree(repo_configs)
+    it = iter(tree)
+
+    while batch := islice(it, batch_size):
+        contents_list = asyncio.gather(
+            *[await visit_url_and_decode_content(item["url"]) for item in batch]
+        )
+
+        for item, contents in zip(batch, contents_list):
             yield Document(
                 page_content=contents,
                 metadata={
@@ -211,14 +226,23 @@ async def lazy_load_batches(file_documents_generator, batch_size=256):
 # ----- Writes all children and parents to json -------------#
 
 
+async def _next_batch(gen):
+    """Pull next batch from async generator, return None when exhausted."""
+    try:
+        return await gen.__anext__()
+    except StopAsyncIteration:
+        return None
+
+
 # 1 GPU version
 async def lazy_embed_chunks_to_json(
     repo_configs,
     model_name="msmarco-bert-base-dot-v5",
     children_path="children.json",
     parents_path="parents.json",
+    fetch_batch_size=10,
 ):
-    document_stream = visit_main_tree_and_extract_docs_files(repo_configs)
+    documents_stream = await stream_documents_in_batches(repo_configs, fetch_batch_size)
 
     # --- Load single GPU ---
     logging.info("Loading embedding model on cuda:0...")
@@ -226,19 +250,31 @@ async def lazy_embed_chunks_to_json(
         f"sentence-transformers/{model_name}",
         token=settings.hf_token.get_secret_value(),
     ).to("cuda:0")
+    # -----------------------
 
-    total_children = 0
-    total_parents = 0
+    # Get first batch of chunks
+    batch_gen = lazy_load_batches(documents_stream)
+    current = await _next_batch(batch_gen)
+
+    if current is None:
+        logging.info("No documents found.")
+        return
+
+    # Start embedding current batch
+    total_children, total_parents = 0, 0
     all_parents = []
 
     with open(children_path, "w") as f:
         f.write("[\n")
         first = True
 
-        async for parent_batch, child_batch in lazy_load_batches(
-            document_stream, batch_size=256
-        ):
+        while current is not None:
+            parent_batch, child_batch = current
             logging.info(f"Embedding batch (children={len(child_batch)}) → cuda:0")
+
+            # Before embedding starts, create task to fetch next batch of documents
+            # while embeddings runs in thread, this task gets next batch concurrently
+            next_batch_task = asyncio.create_task(_next_batch(batch_gen))
 
             embeddings = await to_thread(
                 lambda b=child_batch: model.encode(
@@ -248,6 +284,7 @@ async def lazy_embed_chunks_to_json(
                 ).tolist()
             )
 
+            # Write embedded results to disk
             all_parents.extend(parent_batch)
             for doc, emb in zip(child_batch, embeddings):
                 if not first:
@@ -262,6 +299,9 @@ async def lazy_embed_chunks_to_json(
             total_parents += len(parent_batch)
             logging.info(f"Flushed to disk. Total children so far: {total_children}")
 
+            # Next batch is likely already ready (or nearly so)
+            current = await next_batch_task
+
         f.write("\n]")
 
     # --- write parents once at the end ---
@@ -270,10 +310,10 @@ async def lazy_embed_chunks_to_json(
 
     logging.info(f"Saved {total_children} children → {children_path}")
     logging.info(f"Saved {total_parents} parents  → {parents_path}")
+
     return total_children, total_parents
 
 
-@time_async
 async def delete_all_embeddings(database_url, collection_name="developer_docs"):
     """Truncate all embeddings from the PGVector collection without dropping it."""
 
