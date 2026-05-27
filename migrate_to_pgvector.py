@@ -6,6 +6,7 @@ Loads parents.json   →  document_parents  (parent rows, plain text)
 ────────────────────────────────────────────────────────────────────────────
 """
 
+import os
 import json
 import sys
 from pathlib import Path
@@ -27,8 +28,11 @@ DB_CONFIG = {
     "password": database_settings.app_password.get_secret_value(),
 }
 
-CHILDREN_JSON = "data/children.json"
-PARENTS_JSON = "data/parents.json"
+# Resolves to the parent directory of the 'app' folder
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+CHILDREN_JSON = os.path.join(BASE_DIR, "data", "children.json")
+PARENTS_JSON = os.path.join(BASE_DIR, "data", "parents.json")
 
 BATCH_SIZE = 200
 EMBEDDING_DIM = 768

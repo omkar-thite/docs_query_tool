@@ -1,0 +1,11 @@
+.venv
+.git
+*.md
+*.ipynb
+*ignore
+*cache
+data
+logs
+tests
+.gitignore
+.pre-commit-config.yaml
