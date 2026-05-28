@@ -9,8 +9,11 @@ services:
         required: true
     volumes:
       - pgdata:/var/lib/postgresql   
+      - ./init.sh:/docker-entrypoint-initdb.d/init.sh:ro  
     ports:
       - "5432:5432"
+    profiles:
+      - database_access
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -35,7 +38,9 @@ services:
         condition: service_started
     env_file: 
       - path: .env
-        required: true    
+        required: true   
+    profiles:
+      - database_access 
     volumes:
       - ./app:/src/app 
     
@@ -43,6 +48,8 @@ services:
     build: 
       context: .
       dockerfile: embed/Dockerfile
+    ports:
+      - "5000:5000"
     env_file: 
       - path: embed.env
         required: true    
@@ -51,6 +58,25 @@ services:
       - embed_data:/app/data
     profiles:
       - embed
+    tty: true
+
+  migrate:
+    build: 
+      context: .
+      dockerfile: migrate/Dockerfile
+    ports:
+      - "5001:5001"
+    env_file: 
+      - path: migrate.env
+        required: true    
+    volumes:
+      - ./migrate:/app/migrate
+      - embed_data:/app/data
+    profiles:
+      - database_access
+    depends_on:
+      db:
+        condition: service_healthy
     tty: true
 
 volumes:

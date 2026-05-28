@@ -14,25 +14,20 @@ from pathlib import Path
 import psycopg
 from tqdm import tqdm
 
-from config import database_settings
 from contextlib import contextmanager
 
 from typing import Generator
-# ── Config ────────────────────────────────────────────────────────────────────
 
-DB_CONFIG = {
-    "host": database_settings.db_host,
-    "port": database_settings.db_port,
-    "dbname": database_settings.app_db,
-    "user": database_settings.app_user,
-    "password": database_settings.app_password.get_secret_value(),
-}
+from shared.utils import SecretStr
+
+# ── Config ────────────────────────────────────────────────────────────────────
+db_connection_string = SecretStr(os.environ.get("db_connection_string"))
 
 # Resolves to the parent directory of the 'app' folder
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CHILDREN_JSON = os.path.join(BASE_DIR, "data", "children.json")
-PARENTS_JSON = os.path.join(BASE_DIR, "data", "parents.json")
+PARENTS_JSON = os.path.join(BASE_DIR, "data", "parent.json")
 
 BATCH_SIZE = 200
 EMBEDDING_DIM = 768
@@ -46,7 +41,7 @@ def get_conn(DB_CONFIG) -> Generator[psycopg.Connection, None, None]:
     The connection is automatically closed after the generator is exhausted.
     """
     try:
-        with psycopg.connect(**DB_CONFIG) as conn:
+        with psycopg.connect(db_connection_string.get_secret_value()) as conn:
             yield conn
     except psycopg.Error:
         raise
@@ -96,7 +91,7 @@ def setup_schema(conn):
 
 def load_parents(conn, path: str):
     """
-    Insert rows into document_parents.
+    Insert rows into document_parents table.
     Skips duplicates via ON CONFLICT DO NOTHING.
     """
     raw = json.loads(Path(path).read_text())
