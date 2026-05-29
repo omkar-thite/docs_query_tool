@@ -1,0 +1,15 @@
+[project]
+name = "migrate"
+version = "0.1.0"
+requires-python = "==3.12.13"
+dependencies = [
+    "psycopg[binary,pool]>=3.3.4",
+    "shared",
+    "tqdm>=4.67.3",
+]
+
+
+[tool.uv.sources]
+shared = { workspace = true }
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }

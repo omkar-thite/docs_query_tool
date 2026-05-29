@@ -9,3 +9,4 @@ logs
 tests
 .gitignore
 .pre-commit-config.yaml
+.ipynb_checkpoints

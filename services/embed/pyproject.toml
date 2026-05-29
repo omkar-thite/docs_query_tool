@@ -1,0 +1,19 @@
+[project]
+name = "embed"
+version = "0.1.0"
+requires-python = "==3.12.13"
+dependencies = [
+    "shared",
+    "anyio>=4.13.0",
+    "httpx>=0.28.1",
+    "langchain-core>=1.4.0",
+    "langchain-text-splitters>=1.1.2",
+    "torch>=2.12.0",
+    "sentence-transformers>=5.5.1",
+]
+
+
+[tool.uv.sources]
+shared = { workspace = true }
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }

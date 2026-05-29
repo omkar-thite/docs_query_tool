@@ -27,22 +27,20 @@ services:
     volumes:
       - ollama_data:/root/.ollama   
  
-  query:
-    build: 
-      context: .
-      dockerfile: query/Dockerfile
-    depends_on:
-      db:                         
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    env_file: 
-      - path: .env
-        required: true   
-    profiles:
-      - database_access 
-    volumes:
-      - ./app:/src/app 
+  # query:
+  #   build: 
+  #     context: .
+  #     dockerfile: query/Dockerfile
+  #   depends_on:
+  #     db:                         
+  #       condition: service_healthy
+  #     ollama:
+  #       condition: service_started
+  #   env_file: 
+  #     - path: .env
+  #       required: true   
+  #   volumes:
+  #     - ./services/migrate:/app/services/migrate
     
   embed:
     build: 
@@ -54,7 +52,7 @@ services:
       - path: embed.env
         required: true    
     volumes:
-      - ./embed:/app/embed
+      -  ./services/embed:/app/services/embed
       - embed_data:/app/data
     profiles:
       - embed
@@ -63,21 +61,34 @@ services:
   migrate:
     build: 
       context: .
-      dockerfile: migrate/Dockerfile
+      dockerfile: services/migrate/Dockerfile
     ports:
       - "5001:5001"
     env_file: 
       - path: migrate.env
         required: true    
     volumes:
-      - ./migrate:/app/migrate
+      - ./services/migrate:/app/services/migrate
       - embed_data:/app/data
     profiles:
       - database_access
     depends_on:
       db:
         condition: service_healthy
+      uv-base:
+        condition: service_completed_successfully
+      
     tty: true
+  
+  uv-base:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    volumes:
+      - ./services:app/services
+    
+    
+
 
 volumes:
   ollama_data:
